@@ -1,0 +1,6 @@
+-------------------------------------------------------------------------------
+['/opt/homebrew/opt/sumo/share/sumo/bin/duarouter', '-c', '000/iteration_000_trips.duarcfg']
+Error: No connection between edge '470060648#1' and edge '399568771#0' found.
+Error: Mandatory edge '399568771#0' not reachable by vehicle '32'.
+Error: The vehicle '32' has no valid route.
+Quitting (on error).
