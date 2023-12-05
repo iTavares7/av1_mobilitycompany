@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
@@ -14,6 +15,8 @@ import br.com.av1.sumo.model.banking.AlphaBank;
 import br.com.av1.sumo.model.mobility.Driver;
 import br.com.av1.sumo.model.mobility.MobilityCompany;
 import br.com.av1.sumo.model.mobility.RoutesDTO;
+import br.com.av1.sumo.model.mobility.testdrive.Routes;
+import br.com.av1.sumo.model.mobility.testdrive.TestDrive;
 import br.com.av1.sumo.services.BankingService;
 import br.com.av1.sumo.util.RunnerInterface;
 import br.com.av1.sumo.util.ServerRunner;
@@ -24,7 +27,7 @@ import org.eclipse.sumo.libtraci.StringVector;
 
 public class Application {
 
-    private static final int N_DRIVERS = 100;
+    private static final int N_DRIVERS = 0;
 
     public static void main(String[] args) {
 
@@ -41,49 +44,117 @@ public class Application {
             System.out.println("Falha ao carregar rotas.");
             System.exit(1);
         }
+
+        Routes routes = null;
+        try {
+            JAXBContext jaxbContext = JAXBContext.newInstance(Routes.class);
+            Unmarshaller unmarshaller = jaxbContext.createUnmarshaller();
+            routes = (Routes) unmarshaller.unmarshal(new File("./map/single.rou.xml"));
+        } catch (JAXBException e) {
+            System.out.println("Falha ao carregar rotas.");
+            System.exit(1);
+        }
+
+        int testDrivers = 0;
+
+        if (routes != null) {
+            testDrivers = routes.vehicles.size();
+        }
+
         int alphaPort = 12345;
         int mobilityPort = 54321;
-        
+
+        ServerRunner<RunnerInterface> alphaBankServer = null;
+        ServerRunner<RunnerInterface> mobilityCompany = null;
+        FuelStation fuelStation = null;
+
         try {
-            CyclicBarrier barrier = new CyclicBarrier(N_DRIVERS * 2, () -> {
-                Simulation.step();
-               // System.out.println("Step");
-            });
-
-            // MobilityCompany.setBarrier(barrier);
-
-            ServerRunner<RunnerInterface> alphaBankServer = new ServerRunner<>(alphaPort, new AlphaBank());
+            alphaBankServer = new ServerRunner<>(alphaPort, new AlphaBank());
             alphaBankServer.start();
             BankingService.setBankServicePort(alphaPort);
 
             MobilityCompany.init();
 
-            ServerRunner<RunnerInterface> mobilityCompany = new ServerRunner<>(mobilityPort, new MobilityCompany());
+            mobilityCompany = new ServerRunner<>(mobilityPort, new MobilityCompany());
             mobilityCompany.start();
 
-            FuelStation fuelStation = FuelStation.getInstance();
+            fuelStation = FuelStation.getInstance();
             fuelStation.start();
+        } catch (Exception e) {
+            System.out.println("Erro ao iniciar serviços.");
+            System.exit(1);
+        }
 
-            List<Driver> carpool = new ArrayList<>();
+        List<Driver> carpool = new ArrayList<>();
+        List<TestDrive> testDriverPool = new ArrayList<>();
 
-            for (int i = 0; i < N_DRIVERS; i++) {
-                Driver driver = new Driver(mobilityPort, barrier);
-                driver.start();
-                carpool.add(driver);
-            }
+        AtomicBoolean controler = new AtomicBoolean(true);
 
-        
-            carpool.stream().forEach(driver -> {    
-                try {
-                    driver.join();
-                } catch (InterruptedException e) {
-                    driver.interrupt();
-                    System.out.println("Erro ao dar JOIN");
-                    e.printStackTrace();
+        CyclicBarrier simulationBarrier = new CyclicBarrier(N_DRIVERS * 2 + testDrivers + 1);
+        CyclicBarrier threadBarrier = new CyclicBarrier(N_DRIVERS * 2 + testDrivers + 1);
+
+        for (int i = 0; i < N_DRIVERS; i++) {
+            Driver driver = new Driver(mobilityPort, threadBarrier, simulationBarrier);
+            carpool.add(driver);
+            driver.start();
+        }
+
+        for (int i = 0; i < testDrivers; i++) {
+            TestDrive testDrive = new TestDrive(routes.vehicles.get(i), threadBarrier, simulationBarrier);
+            testDriverPool.add(testDrive);
+            testDrive.start();
+        }
+
+        while (controler.get()) {
+            testDriverPool.forEach(testDrive -> {
+                if (testDrive.getState().equals(Thread.State.TERMINATED)) {
+                    new Thread(() -> {
+                        try {
+                            threadBarrier.await();
+                            simulationBarrier.await();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }).start();
                 }
             });
 
+            carpool.forEach(driver -> {
+                if (driver.getState().equals(Thread.State.TERMINATED)) {
+                    new Thread(() -> {
+                        try {
+                            threadBarrier.await();
+                            simulationBarrier.await();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }).start();
+                }
+            });
 
+            try {
+                threadBarrier.await();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+            Simulation.step();
+            new Thread(() -> {
+                try {
+                    Thread.sleep(25);
+                    simulationBarrier.await();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }).start();
+
+            if (testDriverPool.stream().allMatch(testDrive -> testDrive.getState().equals(Thread.State.TERMINATED))
+                    && carpool.stream().allMatch(driver -> driver.getState().equals(Thread.State.TERMINATED))) {
+                controler.set(false);
+            }
+        }
+
+        try {
             fuelStation.interrupt();
             fuelStation.join();
             mobilityCompany.interrupt();
@@ -95,7 +166,7 @@ public class Application {
             System.out.println("Simulação encerrada.");
 
         } catch (Exception e) {
-            System.out.println("Error: " + e.getMessage());
+            System.out.println("Error ao finalizar threads: " + e.getMessage());
             System.exit(1);
         }
     }

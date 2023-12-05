@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2023-12-03 07:47:39 by Eclipse SUMO duarouter Version 1.19.0
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/duarouterConfiguration.xsd">
+
+    <input>
+        <net-file value="/home/user/projeto/av1_mobilitycompany/map/map2.net.xml"/>
+        <route-files value="/home/user/projeto/av1_mobilitycompany/map/single.trips.xml"/>
+    </input>
+
+    <output>
+        <output-file value="/home/user/projeto/av1_mobilitycompany/map/single.rou.xml"/>
+    </output>
+
+</configuration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <vehicle id="C0" depart="0.00">
+        <route edges="-842028962#1 -842028962#0 -736662810#3 -736662810#2 -736662810#1 -736662810#0 294907540#1 294907540#2 294907540#3 960314176 899833737#3 899833737#4 292489656#0 292489656#1 292489656#2 373329426 291265581#8 320052860#0 367178403#0 367178403#1 367178403#2 367178403#3 367178403#4 367178402#1 367178402#2 291265581#13 291265581#14 291265581#15 291265581#16"/>
+    </vehicle>
+</routes>

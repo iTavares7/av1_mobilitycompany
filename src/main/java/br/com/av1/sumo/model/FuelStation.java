@@ -52,7 +52,6 @@ public class FuelStation extends Thread {
         boolean success = false;
         try {
             pumps.acquire();
-            System.out.println("abastecendo");
             if (chargeDriver(driver, amount)) {
                 driver.refuelCar(amount);
                 success = true;

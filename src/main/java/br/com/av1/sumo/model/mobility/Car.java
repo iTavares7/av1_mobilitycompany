@@ -26,14 +26,13 @@ public class Car extends Thread {
     private int mobilityPort;
     private Socket mobilitySocket;
 
-    private CyclicBarrier barrier;
+    private CyclicBarrier threadBarrier;
+    private CyclicBarrier simulationBarrier;
 
-    private boolean paused = false;
-
-    public Car(int mobilityPort, CyclicBarrier barrier) {
-        this.barrier = barrier;
+    public Car(int mobilityPort, CyclicBarrier threadBarrier, CyclicBarrier simulationBarrier) {
+        this.threadBarrier = threadBarrier;
+        this.simulationBarrier = simulationBarrier;
         this.vehicleId = AutoIncrement.getNextId().toString();
-        System.out.println("Car " + this.vehicleId + " created.");
         this.fuelTank = new FuelTank(20d);
         this.mobilityPort = mobilityPort;
     }
@@ -104,27 +103,23 @@ public class Car extends Thread {
         }
     }
 
+    public String getVehicleId() {
+        return vehicleId;
+    }
+
     @Override
     public void run() {
         while (!this.isInterrupted()) {
 
-            while (!this.hasRoute() || this.paused) {
-                try {
-                    barrier.await();
-                } catch (BrokenBarrierException | InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-
             try {
-                if (!this.paused) {
+                if (this.hasRoute()) {
                     this.fuelTank.consumeFuel(Vehicle.getFuelConsumption(this.vehicleId) / 2500);
                     sendDataToMobility();
                 }
-                barrier.await();
+                
+                this.threadBarrier.await();
+                this.simulationBarrier.await();
+                
 
             } catch (BrokenBarrierException | InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -140,13 +135,5 @@ public class Car extends Thread {
             System.out.println("Error closing socket");
         }
         System.out.println("Car " + this.vehicleId + " stopped.");
-    }
-
-    public void pauseThread() {
-        this.paused = true;
-    }
-
-    public void resumeThread() {
-        this.paused = false;
     }
 }

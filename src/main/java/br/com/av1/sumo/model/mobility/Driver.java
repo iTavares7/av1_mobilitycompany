@@ -10,6 +10,8 @@ import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
 
+import org.eclipse.sumo.libtraci.Simulation;
+
 import br.com.av1.sumo.util.EncryptData;
 import com.google.gson.Gson;
 
@@ -36,20 +38,20 @@ public class Driver extends Thread {
     private Socket mobilitySocket;
     private Socket newRouteSocket;
 
-    private CyclicBarrier barrier;
+    private CyclicBarrier threadBarrier;
+    private CyclicBarrier simulationBarrier;
 
     private double lastDistance = 0;
 
     private double pendingDistance = 0;
 
-    public Driver(int mobilityPort, CyclicBarrier barrier) {
+    public Driver(int mobilityPort, CyclicBarrier threadBarrier, CyclicBarrier simulationBarrier) {
         try {
-            this.barrier = barrier;
+            this.threadBarrier = threadBarrier;
+            this.simulationBarrier = simulationBarrier;
             this.account = bankingService.createAccount(100d);
             this.mobilityPort = mobilityPort;
-            this.currentRoute = requestNewRoute();
-            this.car = new Car(mobilityPort, barrier);
-            car.start();
+            this.car = new Car(mobilityPort, this.threadBarrier, this.simulationBarrier);
         } catch (Exception e) {
             System.out.println("Erro ao criar conta");
             this.interrupt();
@@ -148,15 +150,64 @@ public class Driver extends Thread {
         }
     }
 
+    private void getNewRoute() {
+        if (this.currentRoute != null) {
+            this.markRouteAsCompleted();
+        }
+        this.currentRoute = requestNewRoute();
+        if (currentRoute.getId() != null) {
+            this.car.setRoute(currentRoute);
+        } else {
+            this.car.interrupt();
+        }
+    }
+
+    private boolean isStaged() {
+        return Simulation.getPendingVehicles().contains(this.car.getVehicleId());
+    }
+
     @Override
     public void run() {
+
+        this.car.start();
+        getNewRoute();
+        try {
+            this.threadBarrier.await();
+            this.simulationBarrier.await();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         while (!this.car.isInterrupted()) {
+            boolean staged = isStaged();
+            if (!this.car.hasRoute() && !staged) {
+                getNewRoute();
+                try {
+                    this.threadBarrier.await();
+                    this.simulationBarrier.await();
+                } catch (BrokenBarrierException | InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            } else if (staged) {
+                try {
+                    this.threadBarrier.await();
+                    this.simulationBarrier.await();
+                } catch (BrokenBarrierException | InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
 
             double distance = this.car.getDistance();
             double traveledDistance = distance - this.lastDistance;
             this.lastDistance = distance;
 
-            if(traveledDistance < 0) {
+            if (traveledDistance < 0) {
                 traveledDistance = 0;
             }
 
@@ -175,44 +226,18 @@ public class Driver extends Thread {
                 int amoutToRefuel = (int) (this.driverBalance() /
                         fuelStation.getFuelPrice());
                 if (amoutToRefuel > 0) {
-                    this.car.pauseThread();
                     try {
                         CompletableFuture<Boolean> refueled = fuelStation.getInRefuelQueue(this, amoutToRefuel);
-                        while (!refueled.isDone()) {
-                            barrier.await();
-                        }
+                        refueled.join();
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
-                    this.car.resumeThread();
-                } else {
-                    this.car.interrupt();
-
-                    try {
-                        this.car.join();
-                    } catch (Exception e) {
-                        System.out.println("Error joining car thread");
-                    }
-                    this.interrupt();
-                    System.out.println("Driver " + this.getId() + " ran out of gas");
-                    break;
-                }
-            }
-
-            if (!this.car.hasRoute()) {
-                if (this.currentRoute != null) {
-                    this.markRouteAsCompleted();
-                }
-                this.currentRoute = requestNewRoute();
-                if (currentRoute.getId() != null) {
-                    this.car.setRoute(currentRoute);
-                } else {
-                    this.car.interrupt();
                 }
             }
 
             try {
-                barrier.await();
+                this.threadBarrier.await();
+                this.simulationBarrier.await();
             } catch (BrokenBarrierException | InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
